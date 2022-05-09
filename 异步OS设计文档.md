@@ -83,7 +83,7 @@ pub struct TaskControlBlockInner {
     pub task_cx_ptr: usize,
 
     pub memory_set: MemorySet,
-    
+
     ...
 }
 ```
@@ -91,8 +91,6 @@ pub struct TaskControlBlockInner {
 1. 内核初始化完成之后，读取用户态程序编译为`elf文件`，并创建对应的进程控制块(Process Control block)，插入到进程队列中；
 
 2. （多个或单个）处理器互斥访问进程队列，每次取出一个`PCB`，运行该进程；
-
-
 
 ## 2.2 调度运行内核态协程
 
@@ -113,8 +111,6 @@ pub struct TaskControlBlockInner {
 2. 用户态通过系统调用主动创建一个协程并插入到内核的协程队列；（**目前不支持**）
 
 3. 作为某一种机制的解决方案，如：`IO`多路复用时，内核中的每一个`IO`事件创建为一个协程；（**目前不支持**）
-
-
 
 # 三、用户态的任务调度
 
@@ -150,8 +146,6 @@ pub struct TaskControlBlockInner {
 
 6. 所有协程执行完成，返回到原先的主线中继续执行；
 
-
-
 ## 3.3 协程的执行过程
 
 处理器执行一个又一个的函数，只要处理器在运转，就一定有一个栈支持函数的运行，也必然有一个上下文，随时准备撤下处理器并在之后重新运行。
@@ -167,8 +161,6 @@ pub struct TaskControlBlockInner {
 比如遭遇了时钟中断。
 
 协程会借助与线程的栈和上下文，保存处理器的执行状态，相当于线程在执行一个函数时被中断。
-
-
 
 # 四、时钟中断到来时更新协程信息
 
@@ -354,7 +346,101 @@ fn thread_main() {
 
 ## 5.4、内核协程与用户协程之间的切换
 
+# 七、异步系统调用的实现方案
 
+> 已有的工作：
+> 
+> 1. 通过共享内存使得内核可以访问用户程序的地址空间内的数据结构bitmap；
+
+## 7.1 异步系统调用的过程
+
+![](/Users/wangwenzhi/Desktop/截图/截屏2022-05-08%20下午10.03.20.png)
+
+## 7.2 回调
+
+用户态中有一个数据结构---回调队列，用于保存已经完成异步系统调用任务的`TaskId`，通过共享内存由内核写入，也就是说，回调队列里每有一个可以执行回调函数唤醒的`TaskId`，必然是因为它提交的异步任务已经被内核完成。
+
+1. 通过`TaskId`就可以在`Excutor`中找到对应的`Waker`；
+
+2. 用户态的协程执行器中，每一轮循环的最后会判断回调队列是否为空；
+
+## 7.3 数据结构
+
+```rust
+pub struct Excutor {
+    ...
+    pub waker_cache: BTreeMap<TaskId, Arc<Waker>>,
+}
+
+/// storage TaskId, we can use it to get its waker
+pub struct CBQueue {
+    tids: Vec<TaskId>,
+}
+
+/// 协程执行器
+fn thread_main() {
+    loop {
+        // 取协程...
+        // 执行...
+
+        let cbq = CBQUEUE.lock();
+        while !cbq.is_empty() {
+            let tid = cbq.pop();
+            let waker = EXCUTOR.get_waker(&tid);
+            waker.wake();
+        }
+    }
+}
+
+// =============== KERNEL ===============
+// 异步系统调用必须传递两个整数: space_id, TaskId as usize,
+// space_id用于找到对应进程的回调队列, TaskId用于告知用户程序
+// 已完成异步系统调用的协程
+
+pub struct Event {
+    space_id: usize,
+    tid: TaskId,
+    task: Task,
+}
+
+pub struct EventQueue {
+    events: Vec<Event>,
+}
+
+// 内核中的协程执行器, 如果使用这样的设计, 协程在运行前需要判断当前是否
+// 位于内核
+fn thread_main() {
+    loop {
+        // 取一个事件
+        let event = EVENTQUEUE.lock().pop();
+        // 执行
+
+    }
+}
+
+// 新的思路, 可以兼容用户态的thread_main
+// 我需要的仅仅是在每个协程完成时访问用户进程的回调队列
+
+pub fn async_sys_read(space_id: usize, 
+                      tid: TaskId, 
+                      path: String) 
+{
+    async fn work(...) {
+        read(...);
+
+        // 根据space_id找到对应地址空间的回调队列
+        let cbq = ...;
+        cbq.push(&tid);
+    }
+
+    add_task_with_prio(work, 0);
+    // 系统调用返回
+} 
+
+// 问题是: 什么时候执行异步系统调用
+// 1. 时钟中断到来时执行
+// 2. 单独使用一个处理器进行处理
+```
 
 # #存在的问题
 
@@ -363,8 +449,6 @@ fn thread_main() {
 2. reactor的作用是维护协程状态，可以优化实现为[blog_os/executor.rs at post-12 · phil-opp/blog_os · GitHub](https://github.com/phil-opp/blog_os/blob/post-12/src/task/executor.rs)
 
 3. reactor代码，bitmap地址映射这两个模块代码冗余，封装较混乱；
-
-
 
 # #讨论
 
@@ -383,3 +467,13 @@ fn thread_main() {
    2. `switch_to`切换到idle线程(idle使用main的栈---**函数调用** or 重新创建一个栈---**线程切换**)；
    
    3. 所有协程执行完毕，返回main函数；
+
+# 参考资料
+
+## 1、一种异步回调机制的实现 600行程序
+
+1. 主线程注册并发送`读文件事件`，不去调用文件系统的接口进行`sys_read`，仅仅是注册事件；
+
+2. 4个handle线程类似于内核，不断接受发送过来的`读文件事件`并且读取文件，读取完成之后，发送完成事件给主线程，告知事件已经完成；
+
+3. 主线程在发送完所有的事件之后会进入到一个循环，不断轮询完成事件，并调用对应的回调函数进行收尾工作；
