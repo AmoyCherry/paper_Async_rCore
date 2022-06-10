@@ -573,21 +573,15 @@ pub fn async_sys_read(space_id: usize,
 | 95  | 100  | 8.30         | 1.74    | 0.087       |
 | 110 | 100  | 11.48        | 2.45    | 0.104       |
 
-
-
 ## 8.3、 利用管道读写模拟C/S通信
 
 #### 8.3.1 环境一 MAC os 上运行qemu
 
-
-
-
-
 ##### 8.3.1.1 协程
 
-![](/Users/wangwenzhi/Library/Application%20Support/marktext/images/2022-06-10-15-45-25-image.png)
+![](https://github.com/AmoyCherry/UnifieldScheduler/blob/main/src/c_percent.png)
 
-![](/Users/wangwenzhi/Library/Application%20Support/marktext/images/2022-06-10-16-36-39-image.png)
+![](https://github.com/AmoyCherry/UnifieldScheduler/blob/main/src/c_num.png)
 
 | 协程数 | P50 ms | P60 ms | P70 ms | P80 ms | P90 ms | P95 ms | P99 ms | 100% ms |
 | --- | ------ | ------ | ------ | ------ | ------ | ------ | ------ | ------- |
@@ -610,9 +604,9 @@ pub fn async_sys_read(space_id: usize,
 
 ##### 8.3.1.2 线程
 
-![](/Users/wangwenzhi/Library/Application%20Support/marktext/images/2022-06-10-16-09-13-image.png)
+![](https://github.com/AmoyCherry/UnifieldScheduler/blob/main/src/t_percent.png)
 
-![](/Users/wangwenzhi/Library/Application%20Support/marktext/images/2022-06-10-16-43-21-image.png)
+![](https://github.com/AmoyCherry/UnifieldScheduler/blob/main/src/t_num.png)
 
 | 线程数 | P50 ms | P60 ms | P70 ms | P80 ms | P90 ms | P95 ms | P99 ms | 100% ms |
 | --- | ------ | ------ | ------ | ------ | ------ | ------ | ------ | ------- |
@@ -635,13 +629,9 @@ pub fn async_sys_read(space_id: usize,
 
 ##### 8.3.1.3 基于以上数据的统一比较
 
-![](/Users/wangwenzhi/Library/Application%20Support/marktext/images/2022-06-10-16-54-03-image.png)
+![](https://github.com/AmoyCherry/UnifieldScheduler/blob/main/src/tc_percent.png)
 
-![](/Users/wangwenzhi/Library/Application%20Support/marktext/images/2022-06-10-16-50-07-image.png)
-
-
-
-
+![](https://github.com/AmoyCherry/UnifieldScheduler/blob/main/src/tc_num.png)
 
 # #存在的问题
 
