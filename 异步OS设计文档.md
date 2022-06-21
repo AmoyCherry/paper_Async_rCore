@@ -679,23 +679,23 @@ pub fn async_sys_read(space_id: usize,
 
 
 
-![tc_256B.png](/Users/wangwenzhi/Desktop/截图/论文/tc_256B.png)
+![tc_256B.png](https://github.com/AmoyCherry/UnifieldScheduler/blob/main/src/tc_256B.png)
 
-![avg_tc_256B.png](/Users/wangwenzhi/Desktop/截图/论文/avg_tc_256B.png)
+![avg_tc_256B.png](https://github.com/AmoyCherry/UnifieldScheduler/blob/main/src/avg_tc_256B.png)
 
 #### 8.4.1.1 线程
 
 
 
-![t_256B.png](/Users/wangwenzhi/Desktop/截图/论文/t_256B.png)
+![t_256B.png](https://github.com/AmoyCherry/UnifieldScheduler/blob/main/src/256B.png)
 
-![avg_t_256B.png](/Users/wangwenzhi/Desktop/截图/论文/avg_t_256B.png)
+![avg_t_256B.png](https://github.com/AmoyCherry/UnifieldScheduler/blob/main/src/avg_t_256B.png)
 
 #### 8.4.1.2 协程
 
-![c_256B.png](/Users/wangwenzhi/Desktop/截图/论文/c_256B.png)
+![c_256B.png](https://github.com/AmoyCherry/UnifieldScheduler/blob/main/src/c_256B.png)
 
-![avg_c_256B.png](/Users/wangwenzhi/Desktop/截图/论文/avg_c_256B.png)
+![avg_c_256B.png](https://github.com/AmoyCherry/UnifieldScheduler/blob/main/src/avg_c_256B.png)
 
 
 
