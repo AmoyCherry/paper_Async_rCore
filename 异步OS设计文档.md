@@ -465,8 +465,6 @@ pub fn async_sys_read(space_id: usize,
 
 - 斜率代表单个任务的`平均执行时间 + 平均切换时间`，每个任务的执行内容相同，所以增加的是切换时间，可以看出，随着并发数的加大，线程的切换时间会大幅增加，而协程的增长接近一条直线，切换时间在所测试的尺度内没有明显增加
 
-
-
 ### 8.2.2 环境一  Mac OS上运行qemu
 
 ![](https://github.com/AmoyCherry/UnifieldScheduler/blob/main/src/mac_tc.png)
@@ -475,17 +473,7 @@ pub fn async_sys_read(space_id: usize,
 
 ### 8.2.3 环境二 Linux上运行qemu
 
-
-
-
-
-
-
-
-
 ## 8.3、 实验三：利用管道读写模拟C/S通信，测量尾延迟
-
-
 
 #### 8.3.1 环境一 MAC os 上运行qemu
 
@@ -493,13 +481,9 @@ pub fn async_sys_read(space_id: usize,
 
 ![](https://github.com/AmoyCherry/UnifieldScheduler/blob/main/src/c_percent.png)
 
-
-
 ##### 8.3.1.2 线程
 
 ![](https://github.com/AmoyCherry/UnifieldScheduler/blob/main/src/t_percent.png)
-
-
 
 ##### 8.3.1.3 基于以上数据的统一比较
 
@@ -519,8 +503,6 @@ pub fn async_sys_read(space_id: usize,
 
 3. 任务数量的增加，对于线程的尾延迟有明显影响，且影响远大于协程，这在图上体现为，对于两组曲线左右两侧的差距，线程的左右差距明显更大；
 
-
-
 ## 8.4 实验四：管道连接任务为一个环，变量为环长度、数据量大小
 
 ### 结论
@@ -533,15 +515,11 @@ pub fn async_sys_read(space_id: usize,
 
 4. 协程可以主动让出的特性的配合异步系统调用可以节省CPU的开销，因为协程不需要被大量轮询，只会在其等待的事件（异步系统调用）确定完成之后，才会被唤醒，这使得协程每次被唤醒执行都可以继续向前推进自己的工作。但是，异步系统调用需要维护一套回调机制，主要包括任务的提交以及回调的唤醒通知两部分，就目前的实现来说，大量的异步系统调用的使用会大量增加协程的执行时间；
 
-
-
 ### 8.4.1 1B
 
 ![](https://github.com/AmoyCherry/UnifieldScheduler/blob/main/src/tc_1B.png)
 
 ![](https://github.com/AmoyCherry/UnifieldScheduler/blob/main/src/avg_tc_1B.png)
-
-
 
 ### 8.4.1.1 线程
 
@@ -549,15 +527,11 @@ pub fn async_sys_read(space_id: usize,
 
 ![](https://github.com/AmoyCherry/UnifieldScheduler/blob/main/src/avg_t_1B.png)
 
-
-
 ### 8.4.1.2 协程
 
 ![](https://github.com/AmoyCherry/UnifieldScheduler/blob/main/src/c_1B.png)
 
 ![](https://github.com/AmoyCherry/UnifieldScheduler/blob/main/src/avg_c_1B.png)
-
-
 
 ### 8.4.2 256 B
 
@@ -577,8 +551,6 @@ pub fn async_sys_read(space_id: usize,
 
 ![avg_c_256B.png](https://github.com/AmoyCherry/UnifieldScheduler/blob/main/src/avg_c_256B.png)
 
-
-
 ### 8.4.3 4096 B = 4 KB
 
 ![](https://github.com/AmoyCherry/UnifieldScheduler/blob/main/src/tc_4096B.png)
@@ -591,23 +563,25 @@ pub fn async_sys_read(space_id: usize,
 
 ![](https://github.com/AmoyCherry/UnifieldScheduler/blob/main/src/avg_t_4096B.png)
 
-
-
 #### 8.4.3.2 协程
 
 ![](https://github.com/AmoyCherry/UnifieldScheduler/blob/main/src/c_4096B.png)
 
 ![](https://github.com/AmoyCherry/UnifieldScheduler/blob/main/src/avg_c_4096B.png)
 
-
-
 ### 8.4.4 通过修改协程优先级，减少协程的主动让出与被唤醒的次数
 
+![](https://github.com/AmoyCherry/UnifieldScheduler/blob/main/src/c_1B_without_prio.png)
 
+![](https://github.com/AmoyCherry/UnifieldScheduler/blob/main/src/c_256B_without_prio.png)
 
+![](https://github.com/AmoyCherry/UnifieldScheduler/blob/main/src/c_4096B_without_prio.png)
 
+![](https://github.com/AmoyCherry/UnifieldScheduler/blob/main/src/avg_c_1B_without_prio.png)
 
+![](https://github.com/AmoyCherry/UnifieldScheduler/blob/main/src/avg_c_256B_without_prio.png)
 
+![](https://github.com/AmoyCherry/UnifieldScheduler/blob/main/src/avg_c_4096B_without_prio.png)
 
 ## 8.5 实验五: 内核中进行实验四
 
