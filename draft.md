@@ -1,93 +1,83 @@
 ### A Coroutine Implementation of Operating System in Rust
 
-> 贡献：
+> 贡献：见 1.3
 >
-> 1. 我提出了一种Rust OS中的协程模型，利用Rust语言层面提供的异步函数封装出了协程，【具体的区别】使得操作系统可以感知；
-> 2. 我添加了优先级机制，通过对优先级的控制，使得内核可以感知到协程的存在，使得系统总是能及时执行整个系统（内核态和用户态）中优先级最高的协程；
-> 3. <u>通过VDSO向内核与用户态提供统一协程接口</u>（协程用法：低耦合，易用，对原代码的修改需求较小），并且利用内核协程来实现系统调用，对比与同步syscall，这可以<u>提高线程的并发程度</u>（线程+syscall会阻塞整个线程，协程+asyncall只会阻塞协程），并<u>减少内核执行系统调用的切换开销</u>；
->3. 我在rcore中实现了这种模型，我设计并进行了实验得到结论；
+> 1. ~~我提出了一种Rust OS中的协程模型，利用Rust语言层面提供的异步函数封装出了协程，【具体的区别】使得操作系统可以感知；~~
+> 2. ~~我添加了优先级机制，通过对优先级的控制，使得内核可以感知到协程的存在，使得系统总是能及时执行整个系统（内核态和用户态）中优先级最高的协程；~~
+> 3. ~~我在rcore中实现了这种模型，我设计并进行了实验得到结论；~~
 
-内核调用库，映射到用户态
+
 
 # Abstract 
 
-1. ”协程模型“需要体现特点，与他人的差异，优先级、VDSO、共享；
+> 1. 让读者知道为什么做这项研究；
+> 2. 简述干了什么；
+> 3. 简述结论；
+>
+> 如何写摘要：https://www.aje.com/cn/arc/make-great-first-impression-6-tips-writing-strong-abstract/
+
+
+
+协程是近年来越来越受欢迎的一个程序设计模型，它的非阻塞式异步和非抢占式调度两大特征在现代编程中的应用非常广泛。目前针对协程的研究和应用主要集中于用户态的应用程序之内，协程的调度完全是单个进程之内的行为，而且其在内核中的研究与应用很少。Rust是一门注重高性能和内存安全的编程语言，非常适合底层系统的开发，~~并且在语言层面提供了异步的支持，可以方便快捷地编写异步函数~~。本文基于Rust语言的异步机制，提出了一种带优先级的协程模型，可以做到基于优先级的协作式调度，并且通过引入内核优先级位图，使得内核可以感知用户态的协程的存在，从而干预进程的协程调度。进一步的，本文将此模型实现为一个函数库，它可以应用于一个使用Rust语言编写的OS中，而且可以被内核引入使用，在内核中创建、运行协程。最后，我们通过实验横向对比了引入协程库使用协程的OS，和未引入协程库使用线程的OS之间的性能差异，结果显示，在一定的并发量下，使用协程完成任务的总时间明显小于线程。
+
+
 
 ## Keywords
 
-
+Coroutines, Asynchronous Programming, Operating System, Schedule, Rust
 
 
 
 # 1. INTRODUCTION
 
+在现代编程中，协程主要是作为non-blocking asynchronous programming的抽象来设计和使用。【**Reference**】Asynchronous procedures are procedures whose progression may involve waiting for external events to transpire, but allow for other components of the program to execute while waiting.且由于主动让出而引发的切换不会引起页表（进程）的切换，不会引起栈（线程）的切换，不需要内核的参与。多线程技术的栈切换开销会由于并发量的不断增加而成为系统的性能瓶颈，此时，协程就会是一个有效的解决方案。
+
 
 
 ## 1.1 Coroutines and Related Work
 
-> 1. 简要介绍线程，然后引出协程，做对比，强调协程特性： stackless ，用figure辅助描述；（参考CoroBase）
+> 1. 简介协程；
 > 2. 综述协程的发展；
 >
 > 3. OS领域两个知名的协程接口族：Windows Fiber，POSIX的用户上下文；
 
 
 
-协程是可以自动挂起并在稍后恢复的程序片段。考虑到目前应用广泛的线程，每个线程依赖于栈而执行数个函数嵌套，每个线程都有一个私有的栈。协程可以看作是对线程的进一步拆分，这些协程可以共用同一个线程的栈，协程的切换在用户态完成，不需要通过系统调用让内核介入，是比线程切换更轻量级的切换。
+> 协程定义 ⬇️⬇️⬇️
+>
 
+In the most general sense, coroutines【**UPPSALA Univ. Reference**】 are a generalization of subroutines, equipped with the ability to suspend their own execution, and be resumed by another part of the program later, at which point the coroutine continues execution at the point it previously suspended itself, up until the next suspension or the termination of the coroutine.
 
+同样作为调度和运行的实体，协程和线程有着两大区别：1. 如前文所说，协程在运行时具有异步特征；2. context switching of coroutines is cooperative, there is no need for a mechanism to interrupt the execution of a coroutine, and no strict need for kernel – although the latter may be desirable depending on the design and implementation.所以，就上下文切换这一个操作而言，协程必然优于线程，但在实际的运行中，由于异步和回调机制的具体实现的不同，使得协程并非在所有场景下都能表现出比线程更好的性能。但从另一个方面来看，在某些场景使用协程会带来可观收益，这是值得我们探索和研究的问题，并且已经有开发人员使用协程开发出了很多应用广泛的知名项目，它们会在下文提及。
 
-关于协程的最早的描述由Melvin Conway【**reference**】于1958年给出“subroutines who act as the master program”，随后在其博士论文【**reference**】中给出了如下定义：
+> 协程有很多人用，有很好的产品---> 值得研究  ⬇️⬇️⬇️
 
-1. the values of data local to a coroutine persist between successive calls(协程的局部数据在后续调用中始终保持)；
-2.  the execution of a coroutine is suspended as control leaves it, only to carry on where it left off when control re-enters the coroutine at some later stage(当控制流程离开时，协程的执行被挂起，此后控制流程再次进入这个协程时，这个协程只应从上次离开挂起的地方继续)。
-
-此概念提出后的20年里（1960-1980）协程成为了程序设计语言中一个很受欢迎的概念，但随着multithreading技术的兴起，对协程的研究沉寂了很长一段时间。直到21世纪随着软件服务的发展，抢占式调度对IO型任务处理的低效逐渐受到重视，人们将目光再次投向协程。
-
-2007年Go语言问世之时就在语言层面原生支持协程，Go为每个协程分配了协程栈和协程上下文，但是没有增加线程的数量，本质上还是使用同一个线程栈，只是在线程的基础上通过分时复用的方式运行多个协程。Go协程的轻量级切换带来的性能增益使得Go创造了很多经典项目，如docker（可以在一台物理服务器上快速运行多个实例的虚拟化技术），Kubernetes（简称K8S，由Google 公司开发的构建于 Docker 之上的容器调度服务）。
-
-
-
-C++20
-
-
-
-Lua
-
-
-
-Windows Fiber
-
-
+关于协程的最早的描述由Melvin Conway【**reference**】于1958年提出，它是计算机科学领域中一个经过多年发展且备受欢迎的抽象，目前有许多函数库和编程语言都提供了协程的使用接口，包括在语言层面直接提供协程支持的Go，kotlin，Lua等，以及Windows Fiber(C++)，libco(C++)，tokio(Rust)等协程库。基于这些语言和函数库提供的协程，编程人员开发出了许多实用的产品，如docker（基于Go语言，可以在一台物理服务器上快速运行多个实例的虚拟化技术），WeChat（基于 libco，A Social software that serves 2 billion people）。
 
 ## 1.2 Rust and rCore OS
 
 > 1. 简要介绍Rust作为<u>系统级软件</u>的开发语言的优势，以及对于异步的支持（异步机制介绍，async, await, waker）；（参考Rust官方文档）
 >
-> 2. 引出rcore，并指出目前的rcore没有充分利用rust得异步机制;
+> 2. 引出rcore;
 
-Rust是一种兼顾开发效率和执行效率的语言，没有垃圾回收机制，拥有堪比于C++的运行速度和较高的内存利用率，并且通过严格的类型系统和所有权模型保证了内存安全和线程安全，使得开发人员可以在编译期就消除各种各样的错误。
+Rust是一种兼顾开发效率和执行效率的语言，没有垃圾回收机制，拥有堪比于C++的运行速度和较高的内存利用率，并且通过严格的类型检查和所有权模型保证了内存安全和线程安全。
 
-Rust虽然没有在语言层面的提供完备的协程机制，但是提供了`async`异步编程模型（async代码的运行依赖于库函数的实现）。Rust编译器会将被`async`修饰的代码块或函数生成为一个惰性状态机，也就是说async代码分为构造和执行两步，执行需要主动触发，每一次从主动让出点恢复执行时，都能从上一次让出的地方继续执行，也就是说async代码块具备协作式调度的行为，我们可以用它保存需要执行的任务内容，封装出协程的数据结构。
+Rust虽然没有在语言层面的提供完备的协程机制，但是提供了`async`异步编程模型（async代码的运行依赖于库函数的实现）。Rust编译器会将被`async`修饰的代码块或函数生成为一个惰性状态机，它的使用分为构造和执行两步，执行需要主动触发，每一次从主动让出点恢复执行时，都能从上一次让出的地方继续执行。所以我们可以使用`async`关键字创建异步函数，保存需要执行的任务内容，并将其封装为协程。
 
+> 为什么要用Rust作为开发语言 ⬇️⬇️⬇️
 
+Rust语言的高性能、内存安全与并发安全等优势，使其非常适合底层软件的开发，在区块链和操作系统领域有很多知名项目，例如Facebook（Meta）开发的加密货币Libra，Google开发的新一代跨平台操作系统Fuchsia，Dropbox 的用于处理数万PB的数据规模的底层存储服务，，以及AWS和Microsoft在其云计算平台中大量使用了Rust重写服务和提供组件。
 
-由于Rust语言的性能、内存安全与并发安全等优势，【区块链和操作系统的应用】
-
-
-
-rCore OS是用Rust编写的操作系统，
-
-
-
-
-
-
-
-
+rCore OS是清华大学开发的一款运行于RISC-V平台之上的类Unix OS，支持基本的进程调度和线程调度，但不支持协程，本文把实现的协程库应用在了rCore OS之上，并设计了实验对比rCore OS中的线程与协程的性能差异。
 
 ## 1.3 Contributions and Paper Organization
 
+本文的主要工作有两点：
 
+1. 提出了一种基于Rust语言特性的协程模型，并用Rust语言将其实现为一个函数库。值得注意的是，本函数库完全基于Rust的核心库实现，所以可以被内核引入使用，使得内核也可以创建、运行协程。而标准库需要有OS的支持，所以不能应用于内核，这是与目前已有的一些只能运行于用户态的协程库（如tokio）和语言级协程（如Go协程）的重要区别。
+2. 本文为协程引入了优先级，并参考Linux的O(1)调度算法，实现了协程的优先级调度。基于每个进程的优先级位图，进程内的协程按照优先级被调度执行；基于内核的全局优先级位图，每次时钟中断之后，内核会调度拥有最高优先级协程的进程，该进程会在稍后调度运行该进程内，同时也是整个系统内的最高优先级协程。这个机制使得协程调度不再是各个进程内的独立行为，而是所有进程的协程可以通过优先级被内核统一控制。
+
+本文在接下来的第二章中会介绍（present）协程模型的设计与实现细节，第三章中给出性能对比实验并在第四章做出总结。
 
 
 
@@ -118,7 +108,7 @@ rCore OS是用Rust编写的操作系统，
 
 
 
-此协程模型提供了一种协程的工作和使用方式，相比于【section1】中提到的Rust利用编译器在语言层面提供的协程，本模型的用户态协程可以通过优先级被内核感知，即，用户态的协程的执行可以像进程与线程一样，用户态的协程调度不再是各个进程之内的独立行为，而是所有进程的所有协程可以被内核统一控制。
+此协程模型提供了一种协程的工作和使用方式，相比于【section1】中提到的语言级协程，本模型的用户态协程可以通过优先级被内核感知，即，用户态的协程的执行可以像进程与线程一样，用户态的协程调度不再是各个进程之内的独立行为，而是所有进程的所有协程可以被内核统一控制。
 
 每个进程的协程统一存放在进程的堆内存中，如【上图】所示，模型会在协程ID和协程的数据结构之间建立映射，因此，我们在调度器中就可以只保存协程ID（一个32位或64位整数，取决于机器字长），相比于直接存在协程的数据结构，这样可以减少调度器工作时的内存移动开销。
 
