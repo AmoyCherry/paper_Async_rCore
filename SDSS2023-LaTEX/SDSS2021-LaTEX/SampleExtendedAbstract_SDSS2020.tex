@@ -14,6 +14,9 @@
 \definecolor{weborange}{RGB}{255,165,0}
 \definecolor{frenchplum}{RGB}{129,20,83}
 
+\usepackage{booktabs} 
+\usepackage{makecell}
+
 \usepackage{url}
 \usepackage{hyperref}
 % subsubsubsection
@@ -38,26 +41,26 @@
 \begin{document}
 \maketitle
 \begin{abstract}
-The coroutine is a programming model that has become increasingly popular in recent years. Non-preemptive cooperative scheduling is an effective tool for concurrent programming due to its low cost. Still, there is currently a lack of flexible scheduling algorithms for selecting the next coroutine for execution for multiple coroutines in the ready state. Moreover, the current research and application of coroutines are mainly concentrated in user-mode applications, and the scheduling of coroutines is ultimately a behavior within a single process. 
+Non-preemptive cooperative scheduling of the coroutine is an effective tool for concurrent programming due to its low cost. Still, there is currently a lack of flexible algorithms for scheduling, and the current research and application of the coroutine are mainly concentrated in user mode, and the scheduling of coroutines is ultimately a behavior within a single process. 
 
-Rust is a high-performance and memory-safe programming language suitable for developing low-level systems. Based on the asynchronous mechanism provided by the Rust language, this paper proposes a priority-based coroutine model which can achieve priority-based cooperative scheduling. And by introducing the priority bitmap of the coroutine into the kernel, the kernel can perceive the existence of the coroutines in the user mode through the priorities of the coroutines, thereby intervening in the coroutine scheduling of the whole system.
+This paper proposes a coroutine model with priority and implements it as a library based on the rust language, and it can be used in both user-mode programs and the kernel. In addition, by introducing the priority bitmap into the kernel, it can perceive the existence of user-mode coroutines through priority, and thus intervene in the coroutine scheduling of the entire system.
 
-Further, this paper implements this model as a function library, which can be applied to a Rust-based OS, and both kernel and user mode can create and run coroutines. Finally, we compare the performance difference between the OS that introduces the coroutine library to use the coroutine and the OS that does not introduce the coroutine library to use the thread through experiments. The results show that with sufficient concurrency, the performance of the coroutine is significantly better than the thread.
+Further, we compared the performance difference between the threads and the coroutines implemented in this paper through experiments. The results show that with sufficient concurrency, the performance of the coroutine is significantly better than the thread.
 \end{abstract}
 
-{\bf Keywords:} Coroutines, Asynchronous Programming, Operating System, Schedule, Rust
+{\bf Keywords:} Coroutines, Asynchronous Programming, Operating System, Scheduler, Rust
 
 \section{Introduction}
 
-In modern programming, coroutines are primarily designed and used as an abstraction for non-blocking asynchronous programming. Asynchronous procedures \cite{waern2021coroutines} are procedures whose progression may involve waiting for external events to transpire but allow for other components of the program to execute while waiting. And the cooperative switching between coroutines will not cause the switching of the page table (process) nor the stack (thread) and does not require the participation of the kernel. The stack-switching overhead of multi-threading technology will become the system's performance bottleneck due to the continuous increase of concurrency. At this time, coroutines will be an effective solution \cite{belson2019survey} .
+After a thread enters the kernel through a system call, it needs to wait for the service to complete before returning to the user mod to continue execution, otherwise the entire thread will be blocked. When coroutines are introduced into both user mode and kernel mode, the kernel can encapsulate the service requested by the thread into a coroutine. Therefore, when a thread enters the kernel, it only needs to submit a request to return to the user mode immediately, and continue to execute other coroutines, further improving the concurrency. In addition, the cooperative switching between coroutines will not cause the switching of the page table (process) nor the stack (thread) and does not require the participation of the kernel. The stack-switching overhead of multi-threading technology will become the system's performance bottleneck due to the continuous increase of concurrency. At this time, coroutines will be an effective solution  \cite{belson2019survey} .
 
 \subsection{Coroutines and Related Work}
 
 The earliest description of coroutines was proposed by Melvin Conway \cite{conway1963design} in 1958, and it is a popular abstraction in computer science that has developed over the years. In the most general sense, coroutines \cite{waern2021coroutines, moura2009revisiting} are a generalization of subroutines, equipped with the ability to suspend their own execution, and be resumed by another part of the program later, at which point the coroutine continues execution at the point it previously suspended itself, up until the next suspension or the termination of the coroutine.
 
-A thread is an encapsulation of a function (generally called a thread main function), and the execution of a thread is that multiple nested functions enter and exit on the stack and execute corresponding instructions. Therefore, thread switching needs to save the stack and the stack's state (the CPU's register value, usually called the context). A coroutine is an encapsulation of an asynchronous function. Usually, it needs to execute a relatively small number of instructions and runs on the thread stack as a function call. The stack must correspond one-to-one with a thread, so it can be considered that a coroutine runs in a thread. Asynchronous functions allow the program to return directly while waiting for an external event and execute other parts of the program without blocking the execution flow of the entire stack. Multiple coroutines running in the same thread reuse the same stack to execute their own asynchronous functions at different times. Therefore, switching between them has no stack-switching overhead. When the asynchronous function is interrupted or preempted before it reaches the yield point, since the coroutine is executed in the thread in the form of a function call, the thread's interrupt mechanism can be used at this time, which not only saves the thread's interrupt location and context, it also saves the interrupt location and context of the coroutine. The coroutine can continue to execute when the thread resumes.
+The \textbf{stacked coroutine} \cite{WANG2022102980} is similar to the thread which holds the call information on the stack. As a coroutine is created, stack memory is allocated to hold the context of the coroutine, and if a child coroutine is created, it continues to be pushed to the stack. The feature of the stacked coroutine is that users do not need to worry about the scheduling. The dis- advantage is that it is difficult to allocate a reasonable stack size. The state-of-art languages that use stacked coroutines are Lua \cite{de2004coroutines} and Golang \cite{prabhakar2011concurrent}.
 
-There are currently many function libraries and programming languages that provide interfaces for coroutines, including Go \cite{prabhakar2011concurrent}, kotlin \cite{elizarov2021kotlin}, Lua \cite{de2004coroutines}, etc. that directly support coroutines at the language level, as well as Windows Fiber (C++) \cite{Fibers}, libco (C++) \cite{Boost}, tokio (Rust) \cite{weber2020process} and other coroutine libraries. Based on the coroutines provided by these languages and function libraries, programmers have developed many practical products such as docker (based on Golang, a virtualization technology that can quickly run multiple instances on a physical server), and WeChat (based on libco, a Social software that serves 2 billion people).
+\textbf{Stackless coroutines} are used like functions. which store coroutine local variable in heap memory. Since there is no stack, subroutines can be woken up anywhere in the program. The stackless coroutine is characterized by the low overhead of coroutine switching. The disadvantage is that coroutine scheduling is unbalanced and users need to intervene in the scheduling. Popular languages such as C++ \cite{8995550}, Rust \cite{weber2020process}, Kolint \cite{elizarov2021kotlin} and Python \cite{tismer2000continuations} use stackless coroutines. The coroutine model in this paper is also stackless.
 
 The above large-scale practical applications are based on previous work, and research in recent years is constantly exploring more possibilities for coroutines. Corobase \cite{he2020corobase} adopts the coroutine-to-transaction model to hide data stalls during data fetching. Zhu et al. \cite{zhu2018interactive} introduce the coroutine-to-SQL model to reduce the waiting cost of interactive transactions. FaSST \cite{kalia2016fasst} and Grappa \cite{nelson2015latency} use the C++ coroutine package to hide the RDMA network latency.
 
@@ -65,22 +68,19 @@ But without exception, none of the above coroutines support priority scheduling.
 
 \subsection{Rust and rCore OS}
 
-Rust is a high-level language for developing system software. Its rich type system and ownership model guarantee memory safety and thread safety. Moreover, it focuses on performance, so there is no runtime and garbage collector.
+For the above programming languages, we need to choose one to implement the coroutine model. For performance reasons, we first exclude golang and kotlin due to their garbage collectors, and python. We choose the latter between C++ and Rust due to memory safety concerns, as its ownership model largely eliminates the need for manual reference counting. Based on the above advantages, Rust is very suitable for the development of low-level software, such as the cryptocurrency Libra developed by Facebook (Meta), and the new generation of cross-platform operating system Fuchsia developed by Google.
 
-Although Rust does not provide a complete coroutine mechanism at the language level, it provides the \textit{async/await} asynchronous programming model \cite{cutner2021safe} (the operation of async code depends on the implementation of library functions). The Rust compiler will generate a code block or function decorated with \textit{async} as a state machine, which can be regarded as an object composed of variables, states, and multiple functions corresponding to multiple states. When the function corresponding to a state is executed, the state machine will move to the next state and execute the function return, waiting for the next time to resume execution from the new state just moved to. Therefore, each yield of a function decorated with \textit{async} is equivalent to executing a function and returning without any information remaining on the thread's stack, so Rust's asynchronous function does not need to save the context for switching caused by actively yielding.
-
-The advantages of Rust language, such as high performance, memory safety, and concurrency safety, make it very suitable for the development of low-level software. There are many well-known projects in the field of blockchain and operating systems, such as the cryptocurrency Libra (Now renamed Diem) developed by Facebook (Meta), and the new generation of cross-platform operating system Fuchsia developed by Google, Dropbox's underlying storage service \cite{jayakar2020rewriting} for processing tens of thousands of petabytes of data, and AWS \cite{Amozon} and Microsoft \cite{Fibers} heavily use Rust to rewrite services and provide components in their cloud computing platforms.
+In addition, the \textit{async/await} programming model provided by Rust language has strong support for asynchrony, and this feature can be used to create asynchronous functions easily. During its execution, it will exit many times in the form of function return, and then continue to execute after being woken up. We can simply process the asynchronous function to obtain the data structure used to describe the coroutine, that is, the coroutine control block.
 
 rCore OS is a Unix-like operating system developed by Tsinghua University and runs on the RISC-V platform. Many designs of its kernel make full use of the features of the Rust language to facilitate the extension of asynchronous mechanisms. It supports processes and threads but does not support coroutines. This article applies the implemented coroutine library to rCore OS and designs some experiments to compare the performance differences between threads and coroutines in rCore OS.
-
 
 \subsection{Contributions and Paper Organization}
 
 The main work of this paper has two points:
 
-1. This paper proposes a coroutine model based on Rust language and implements it as a function library in Rust language. It is worth noting that this function library is completely implemented based on the core library of Rust, so it can be introduced and used by the kernel so that the kernel can also create and run coroutines. The standard library of Rust needs the support of the operating system, so it cannot be applied to the kernel. This is an essential difference from some existing coroutine libraries (such as tokio) that can only run in user mode.
+1. This paper proposes a coroutine model with priority, which does not depend on the support of the operating system, so it can be used in both user-mode programs and the kernel. In addition, by introducing priority bitmaps, we unify the coroutine scheduling of user mode and kernel mode, which means that all coroutines in the system will be in the same scheduling framework.
 
-2. This paper introduces priority for coroutines and implements priority scheduling of coroutines concerning Linux's O(1) scheduling algorithm. Based on the coroutine priority bitmap of each process, the coroutines in the process are scheduled and executed according to the priority; based on the global priority bitmap of the kernel, after each clock interruption, the kernel will schedule the process with the highest priority coroutine, the process will later schedule and run its own highest priority coroutine, which is also the highest priority coroutine in the entire system. This mechanism makes coroutine scheduling no longer an independent behavior within each process, but the kernel can uniformly control the coroutines of all processes through priority.
+2. We present a reference implementation of a library based on the Rust language, and verify through experiments that coroutines are significantly better than threads under high load conditions.
 
 This paper will present the design and implementation details of the coroutine model in the next second section, give a performance comparison experiment in the third section and make a conclusion in the fourth section.
 
@@ -93,24 +93,24 @@ This section describes the overall framework and design details of this coroutin
 \begin{figure}[ht]
 \begin{center}
 \includegraphics[width=\columnwidth]{SDSS2021-LaTEX/overview.png}
-\caption{The architecture of the coroutine model in this paper}
+\caption{The architecture of the coroutine model.}
 \label{overview}
 \end{center}
 \end{figure}
 
-As shown in \textit{Figure 1}, the Rust language provides asynchronous functions, and the coroutine library provides priority and coroutine ID fields and encapsulates them into a data structure called a coroutine control block. Each coroutine control block represents a coroutine. And a coroutine can be regarded as a scheduling object corresponding to a global asynchronous function one-to-one. We use the coroutine ID as an index to store all the coroutines in a hash table on the process's heap memory. By traversing this hash table, we can get all the coroutines, and we can also get or delete the specified coroutine through the coroutine ID. 
+As shown in \textit{Figure 1}, the Rust language provides asynchronous functions, and the coroutine library provides priority and coroutine ID fields and encapsulates them into a data structure called a coroutine control block. Each coroutine control block represents a coroutine. And a coroutine can be regarded as a scheduling object corresponding to a global asynchronous function one-to-one. We use the coroutine ID as an index to store all the coroutines in a hash table on the process's heap memory. We can get or delete its corresponding coroutine control block through the coroutine ID.Considering that the coroutine will enter and exit the scheduler many times during its life cycle due to waiting for external events, compared to the scheduler directly managing the coroutine control block, it can reduce the memory overhead when the scheduler works. 
 
-The coroutine scheduler provides two necessary interfaces: push and pop, which are used to insert and delete coroutines, and implement the coroutine scheduling algorithm. For priority scheduling, we will set up multiple queues, each with a different priority, and store the coroutine ID of the coroutine at the corresponding priority in it. Query these queues from high to low priority to complete priority scheduling. After getting a coroutine ID from the scheduler, if you need complete information of the coroutine, you can get it through the coroutine ID and the hash table. Considering that the coroutine will enter and exit the scheduler many times during its life cycle due to waiting for external events, compared to the scheduler directly managing the coroutine, this can reduce the memory overhead when the scheduler works. We use the priority bitmap to describe the priority layout of the coroutines within each process. We also use a bitmap in the kernel to describe the priority layout of the coroutines of all processes. The kernel can perceive the existence of coroutines and their priority through these bitmaps, and formulate the scheduling strategy of the process, thereby indirectly intervening in the coroutine scheduling in the user mode. This makes coroutine scheduling no longer an independent behavior within each process but allows them to be considered uniformly from a global perspective. Its design and implementation will be introduced in Section 2.3. The above is the coroutine structure within the process.
+The coroutine scheduler provides two necessary operations: push and pop, which are used to insert and delete coroutines, and implement the coroutine scheduling algorithm. For priority scheduling, we will set up multiple queues, each with a different priority, and store the coroutine ID of the coroutine at the corresponding priority in it. Query these queues from high to low priority to complete priority scheduling. 
 
-The execution of functions must depend on the stack, the same is valid for asynchronous functions. For this, we have the following design: When a coroutine needs to be executed, we start the coroutine executor, which is essentially a function. The coroutine executor will take out all the coroutines in the ready state and run them in a loop. The coroutine will use this thread's stack to execute its asynchronous function. When the coroutine is completed or suspended due to waiting for external events, it will exit the occupied thread stack by returning the function. At this time, the thread running the coroutine executor is idle. To be precise, it is not executing any coroutine, which means the next coroutine can use its stack. If there are no ready coroutines, the coroutine executor thread breaks out of the loop and ends.
+We use the priority bitmap to describe the priority layout of the coroutines within each process. We also use a bitmap in the kernel to describe the priority layout of the coroutines of all processes. The kernel can perceive the existence of coroutines and their priority through these bitmaps, and formulate the scheduling strategy of the process, thereby indirectly intervening in the coroutine scheduling in the user mode. This makes coroutine scheduling no longer an independent behavior within each process but allows them to be considered uniformly from a global perspective. Its design and implementation will be introduced in Section 2.3. The above is the coroutine structure within the process.
 
-We introduce the concept of \textit{dynamic binding} here to describe the relationship between a coroutine and a stack, that is: the execution of a coroutine (asynchronous function) requires a stack, but the coroutine may execute on different stacks as it yields and resumes, and obviously the same stack can also execute different coroutines. This coroutine model exhibits this phenomenon because each process has only a unique coroutine scheduler.
+The execution of functions must depend on the stack, the same is valid for asynchronous functions. For this, we have the following design: When a coroutine needs to be executed, we start the coroutine executor, which is essentially a function. The coroutine executor will take out all the coroutines in the ready state and run them in a loop. The coroutine will use this thread's stack to execute its asynchronous function. When the coroutine is completed or suspended due to waiting for external events, it will exit the occupied thread stack by returning the function. At this time, the thread running the coroutine scheduler can take out the next coroutine from the scheduler to run.
 
 The coroutine needs to be woken up after it yields because it waits for external events. Wake-up is a key mechanism of the coroutine. This part is described in detail in Section 2.4.
 
 
 \subsection{Interface}
-We implement this model as a function library. This library provides two interfaces, which are used to create coroutines and start coroutine executors, respectively. Since all instructions of this function library do not depend on the support of the operating system, such as system calls, both user mode and kernel mode can use these two interfaces to create and run coroutines by calling library functions.
+The coroutine model will be presented as a function library, which only provides an interface-\textit{coroutine\_run}, it will be used to create coroutines and start the coroutine executor.
 
 \lstset {
     language=C++,
@@ -135,215 +135,164 @@ We implement this model as a function library. This library provides two interfa
 }
 
 \begin{lstlisting}
-// Interface1:
-fn coroutine_create(async_func, priority = DEFAULT);
+// Algorithm 1
+fn coroutine_run(async_main, prio = DEFAULT){
+    create_coroutine(async_main, prio);
+    if get_coroutine_size() <= 1:
+        run();
+}
 \end{lstlisting}
 
-The interface \textit{coroutine\_create} for creating a coroutine requires passing in a necessary asynchronous function, which encapsulates the instructions that the coroutine needs to execute. In the Rust language, you only need to add the async keyword before the declaration of a normal function to declare it as an asynchronous function. In addition, you can specify the priority of the coroutine in the parameter. If not specified, the priority of the coroutine will be set to the default value. The interface will encapsulate the incoming asynchronous function as a coroutine, and insert it into the coroutine queue of the corresponding priority, waiting to be scheduled for execution.
-
-\begin{lstlisting}
-// Interface2:
-fn coroutine_run(wait);
-\end{lstlisting}
-
-Start the coroutine executor interface \textit{coroutine\_run} to jump to the function responsible for scheduling and executing the coroutine. When there is no coroutine in the process (no coroutine has been created or all coroutines have been executed), this interface will exit immediately. And when there is no coroutine in the ready state in the process, but there is at least one coroutine in the waiting state, you can choose to exit the interface through the passed in parameters, or wait for the appearance of the coroutine in the ready state.
+We use the \textit{async} keyword provided by the Rust language to create an asynchronous function, where the asynchronous code statement needs to be decorated with the \textit{await} keyword, and this asynchronous function will run as the main function of the coroutine. When no coroutine priority is specified it will be given the default value. If we need to execute a batch of coroutines, this interface should be nested in an asynchronous function to create coroutines in batches. When the first coroutine is created, the interface needs to call the run function to start the coroutine executor; when the number of coroutines is greater than 1, it means that the executor has been started, and this interface only needs to complete the creation of the coroutine.
 
 
 \subsection{Priority and Schedule}
 
-We handle the scheduling order of coroutines based on priority. Within a process, coroutines are executed from high to low priority; between processes, the process with the highest priority coroutine will be scheduled first. The scheduler only operates on the coroutine ID to simplify memory operations. When the complete information of the coroutine is required, it can be obtained by mapping the coroutine ID.
-
+We handle the scheduling order of coroutines based on priority. Within a process, coroutines are executed from high to low priority; between processes, the process with the highest priority coroutine will be scheduled first. 
 
 \subsubsection{Coroutine scheduling within a process}
 
-Each coroutine has a priority. The IDs of coroutines at the same priority are managed by the same queue. Multiple different priorities will correspond to multiple different queues, they form a queues group. Each process has only such a group, which is stored in the process's heap memory. The coroutines in the priority queues are all in a ready state, that is, they can be scheduled for execution immediately, but the order of execution is distinguished by priority. Obviously, the newly created coroutine will be inserted directly into the queue. For non-ready coroutines, they will be re-inserted into the priority queue after being woken up. The specific process will be introduced in Section 2.4.
-
-At any position in any thread, we can call the \textit{coroutine\_run} interface mentioned in Section 2.2 to execute the coroutine. It will continuously access the scheduler in a loop to get the coroutines and execute them. At this time, the scheduler will access the queues from high to low according to priority. , when the first non-empty queue appears, a coroutine ID is popped from the queue, and this coroutine is one of the highest priority coroutines that can be executed immediately in the process.
-
-If all queues are empty, no coroutines can be executed in the process, and the scheduler will return an empty value. At this time, it will be further judged whether the number of coroutines is 0, that is, whether there are coroutines in the waiting state. If there is no coroutine, it means that all the coroutines are executed, and the coroutine executor can be exited. If there is, choose to exit the \textit{coroutine\_run} function according to the parameters passed in, or call the system call to make the current thread yield until it is rescheduled and at least one ready coroutine exists to continue the execution of coroutines
-
-
+Each coroutine has a priority. After the coroutine is created, it will be inserted into the corresponding priority queue and wait to be scheduled for execution. The scheduler scans the queues according to the priority from high to low, and searches for the first non-empty queue to complete the priority scheduling. Only the coroutines in the ready state are saved in the queues, and the coroutines in the waiting state will be reinserted into the queue after being awakened, which ensures the query efficiency of the scheduler.
 
 \subsubsection{Coroutine Scheduling of the Whole System}
 
-Based on the previous design, the priority scheduling of coroutines can be implemented within the process. Now, we extend it to the entire system to perform priority scheduling on the coroutines of all processes. This requires obtaining the priority information of the coroutines of all processes in the kernel and recording the process of the coroutine with the highest priority. Then when switching from the kernel to the user mode, the process is scheduled, and the highest priority coroutine can be scheduled to run in the process.
-
+Based on the previous design, the priority scheduling of coroutines can be implemented within the process. Now, we extend it to the entire system to perform priority scheduling on the coroutines of all processes. 
 
 \paragraph{Priority Bitmap}~{}
 
 We use bitmaps to describe the priority layout of coroutines.
 
-Each process will maintain a bitmap whose length is the number of priorities of the coroutines, and the value of each bit is 0 or 1, indicating whether there is a coroutine of that priority. When accessing the scheduler to insert or require a coroutine, the queue corresponding to the priority will push or pop a coroutine ID. If it changes from empty to non-empty or non-empty to empty, the corresponding bit in the process bitmap is written as 1 or 0.
+Each process will maintain a bitmap whose length is the number of priorities of the coroutines, and the value of each bit is 0 or 1, indicating whether there is a coroutine in the ready state  of that priority. 
 
-Since the kernel also has its own address space, it can create and run coroutines. Therefore, the kernel also has a priority bitmap to represent the priority information of the coroutines it manages, called the kernel bitmap.
+The kernel of a modern operating system basically has an independent address space and page table, so the kernel also has a priority bitmap to represent the priority information of the coroutines it manages, called the kernel bitmap.
 
-In addition, we set an extra bitmap in the kernel to represent the priority information of the coroutines of the whole system, which is called the system bitmap. The length of this bitmap is also the number of priorities of the coroutines. Still, the 0 or 1 of each bit represents whether there are coroutines of this priority in all processes of the entire system. To calculate the value of this bitmap, it is necessary to enable the kernel to access the bitmaps of all processes. Our approach is to specify a virtual address as the address of the process accessing the bitmap in user mode. Then, when the process is initialized, apply to the kernel for a free physical page, map the specified virtual address to the starting address of the physical page, and grant the process permission to read and write this address. In this way, the process can read and write the bitmap in user mode, and the kernel can also directly access the bitmap of the process.
+In addition, we set an extra bitmap in the kernel to represent the priority information of the coroutines of the whole system, which is called the system bitmap. But the 0 or 1 of each bit represents whether there are coroutines of this priority in all processes and the kernel of the entire system.
 
-We map each process ID with the physical address of its process bitmap, and we can get all process bitmaps in the kernel by enumerating the IDs of the processes.
+According to the definition of the system bitmap, we can know that its value is the result of the OR operations of all processes and kernel bitmaps-as long as at least one coroutine of at least one process belongs to this priority, the corresponding bit in the system bitmap is 1; and only when all processes do not have coroutines of this priority, the corresponding bit in the system bitmap will be 0. As shown in Figure, it will be calculated when the clock interrupt arrives.
 
-\begin{figure}[ht]
-\begin{center}
-\centerline{\includegraphics[width=\columnwidth]{bitmap.png}}
-\caption{The structure of priority bitmaps in the kernel}
-\label{bitmap}
-\end{center}
-\end{figure}
+Now we explain how the kernel gets all the bitmaps. Our approach is to specify a virtual address as the address of the process accessing the bitmap in user mode. Then, when the process is initialized, apply to the kernel for a free physical page, map the specified virtual address to the starting address of the physical page, and grant the process permission to read and write this address. In this way, the process can read and write the bitmap in user mode, and the kernel can also directly access the bitmap of the process. We map each process ID with the physical address of its process bitmap, and we can get all process bitmaps in the kernel by enumerating the IDs of the processes.
 
-The value of the system bitmap is based on all process bitmaps. When the clock interrupt arrives, the kernel is responsible for traversing the bitmaps of all processes and updating the system bitmap. However, it is evident that this calculation process is a relatively simple procedure, that is, it only needs to perform OR operations on all process bitmaps-as long as at least one coroutine of at least one process belongs to this priority, the corresponding bit in the system bitmap is 1, and only when all processes do not have coroutines of this priority, the corresponding bit in the system bitmap will be 0. The update is completed by assigning the results of the OR operations of all process bitmaps to the system bitmap.
 
 \paragraph{Global Scheduling Based on Priority Bitmap}~{}
 
-The current system has process bitmaps and the system bitmap, which can schedule the process with the highest priority coroutine after each clock interrupt. Within a clock interrupt, the bitmap of the process will change as the coroutines are created and exited. Still, the bitmap changes of each process will not be synchronized to the system bitmap before the next clock interrupt. That is to say when all the highest priority coroutines return (exit or yield) and before the next clock interrupt arrives, the priority scheduling of coroutines is not yet satisfied for the entire system. If we want all coroutines of the whole system to abide by priority scheduling during operation strictly, we further provide the following design.
+Based on the above bitmaps, we can guarantee the global priority scheduling when the clock interrupt arrives: the system bitmap will be updated when the clock interrupt arrives, and then the process or kernel with the highest priority coroutine can be scheduled to run according to the result, and the highest priority coroutine will be scheduled to run in this address space, We call this \textbf{relaxed global priority scheduling}.
 
-As we know, the coroutine will yield the thread stack by exiting or yielding via function return. In either case, it will enter the next loop after that and access the scheduler again to obtain a coroutine and execute it. Before entering the next loop, we can read the process bitmap and the system bitmap and compare the highest priority recorded by the two, which is equivalent to querying whether there are unexecuted highest priority coroutines in this process. If the highest priority of the coroutine in the process is lower than the highest priority of the coroutine in all processes recorded in the system bitmap, It means that the highest priority coroutines in this process have all been executed. At this time, the system call \textit{sys\_yield} should be called to yield the current processor, enter the kernel to update the system bitmap, and schedule according to the result; otherwise, continue to execute.
+Within one clock cycle, the changes in the priority layout of coroutines caused by the creation, wake-up and deletion of coroutines are synchronized to the system bitmap in time, so that the process with the highest priority coroutine is always prioritized scheduling, we call this \textbf{strict global priority scheduling}.  Our specific measures are: the bitmap of the process can always be updated in real time by the execution of the coroutines, so before each execution of the coroutine, compare the highest priority recorded in the process bitmap and the system bitmap, If and only if there is a coroutine with a higher priority recorded in the system bitmap, it will enter the kernel through a system call to update the system bitmap, and then reschedule according to the result.
 
-Obviously, if strict priority scheduling is pursued, a large amount of switching overhead between user mode and kernel will be introduced due to updating the system bitmap multiple times during a clock interrupt. So this way should be offered as an option. Since this is the behavior of the coroutine executor (it decides whether to check the system bitmap), we can control whether it is turned on or not through a parameter. By default, relaxed priority scheduling is performed, that is, schedule the process with the highest priority coroutine only after each clock interrupts, and the system bitmap is not updated within a clock interruption.
+Obviously, adopting strict global priority scheduling will ensure that the highest priority coroutine in the system is always executed first, but it will also introduce a lot of overhead by frequently entering the kernel within a clock cycle, and relaxed scheduling is the opposite. Fortunately, which scheduling strategy to adopt is the behavior of the coroutine executor itself, and we can control which strategy it chooses through a parameter according to needs.
 
 
-\subsection{Excutor and Asynchronization }
+\subsection{Coroutine Manager and Asynchronization }
 
-The executor is the coroutine management organization in this model, responsible for managing the coroutine data structures, priority queues, and the coroutine wake-up mechanism described in this section.
+The Coroutine Manager is responsible for managing the coroutine control blocks, the scheduler, and the coroutine wakeup mechanism introduced in this section.
 
 \begin{figure}[ht]
 \begin{center}
-\centerline{\includegraphics[width=\columnwidth]{states.png}}
-\caption{The state transitions of a coroutine during its lifetime}
+\centerline{\includegraphics[width=\columnwidth]{SDSS2021-LaTEX/states.png}}
+\caption{The state transitions of a coroutine during its lifetime.}
 \label{states}
 \end{center}
 \end{figure}
 
-Let's take a closer look at the two situations in which coroutines give up the thread stack:
+ Only the IDs of the coroutines in the ready state are saved in the priority queue of the scheduler, so the wake-up operation can be completed by inserting the IDs of the coroutines awakened from the waiting state into the queue, and it only needs the ID and priority of the coroutine, and the address of the queue. We can encapsulate these three variables into a data structure called TaskWaker, and establish a mapping between the coroutine ID and the corresponding TaskWaker. So when a coroutine needs to be woken up, only its coroutine ID is needed. We will check whether its TaskWaker is created before each coroutine is executed, and delete it when the coroutine is deleted. Obviously, TaskWaker should be managed by the coroutine manager.
 
-1. After the coroutine is executed, the main function of the coroutine is executed and returned. At this time, the data structure of the coroutine will be found according to the coroutine ID and the heap memory occupied by it will be released;
-
-2. The coroutine has not been executed and cannot continue to execute because it is waiting for an external event, so it chooses to give up by returning the function. At this time, we advocate not inserting the coroutine ID back into the priority queue but directly entering the next round of loops and accessing the scheduler to take out the next coroutine and execute it. When the waiting event of the suspended coroutine arrives, the wake-up operation is performed, that is, the wake-up coroutine ID is inserted back into the priority queue. This is the asynchronous mechanism of the coroutine in this model. It can complete the wake-up operation of the coroutine conveniently and ensure the work efficiency of the scheduler. This means that each coroutine in the priority queues is in a ready state that can be executed immediately. When accessing the priority queues, there is no need to check the coroutine's state nor to access the coroutine in the waiting state.
-
-Now we know that the operation of waking up a coroutine is to insert the ID of the coroutine into the corresponding priority queue, which requires the ID of the coroutine, the priority of the coroutine, and the address of the priority queue. We can encapsulate these three variables into a data structure called \textit{TaskWaker}, and establish a mapping between the coroutine ID and the corresponding \textit{TaskWaker}. When a coroutine needs to be woken up, only its coroutine ID is needed. For the creation timing of TaskWaker, we can check whether the TaskWaker is created before the coroutine is selected to execute and has not yet started to execute. If not, create it and hand it over to the Executor for management. Obviously, when a coroutine exits, its corresponding taskwaker is deleted immediately.
-
-So the key question now is how to get the coroutine ID waiting to be woken up for the coroutine that executes the waiting event and the wake-up operation. We introduce a data structure called \textit{WakerMap} here, which maintains the mapping of integer key values to coroutine IDs. For the waiting coroutine and the coroutine that performs the wake-up operation, they need to pass in the same key value when they are created (this requires the use of a global counter with mutually exclusive access within the process) to establish a connection. When the coroutine waits for an external event, the key-value pair consisting of the integer passed in the parameter and the coroutine ID is inserted into the WakerMap, and then when another coroutine completes the external event, it can directly find the one that needs to be awakened according to the key value; If the coroutine that performs external events and wake-up operations is scheduled to execute first, it will find empty items and do nothing when it queries WakerMap to wake up another coroutine, but this does not affect the execution of the program. Later, when the coroutine waiting for the external event is executing, it will find that the waiting event has already arrived (for example, the buffer has written enough data), and will not return and yield the thread stack
-
-Based on the above design and implementation, we can summarize the coroutine scheduling of this model as considering the coroutines in the ready state in the entire system (including user mode and kernel), the process with the highest priority coroutine will be entered from the kernel after each clock interrupt. The priority scheduling of coroutines is then performed within that process. If there is a coroutine with a higher priority in user mode than in kernel, the user mode program will be scheduled for execution first.
+Now the coroutine executing the external event can use TaskWaker to wake up the suspended coroutine. But the key question is how it gets the ID of the coroutine it is going to wake up. We introduce a data structure called WakerMap here, which maintains the mapping of integer key values to coroutine IDs. For the waiting coroutine and the coroutine that performs the wake-up operation, they need to pass in the same key value when they are created (this requires the use of a global counter with mutually exclusive access within the process) to establish a connection. The waiting coroutine will insert the key and ID into WakerMap, and the wake-up coroutine can access TaskWaker and WakerMap through the same key to wake it up. If the wake-up coroutine is executed first, a null value will be read when accessing the WakerMap and the wake-up operation will be omitted, and then the waiting coroutine will not be suspended because the waiting event has already arrived (for example, the buffer has written enough data).
 
 
 \section{PERFORMANCE COMPARISON}
 
-We introduced this coroutine library on rCore OS, which enables rCore to create and execute coroutines. On this basis, experiments are designed to compare the performance difference between the rCore that uses coroutines and the unmodified rCore that uses threads.
+We introduce this coroutine library on rCore OS to compare the performance between coroutines and threads. Each experiment creates multiple processes to run, and each process runs coroutines or threads, which will perform some of the same work. Two times are collected at the beginning and end of the process, and the difference between them is used as the running time of each test. We will compare multiple runtimes under multiple concurrency levels, and summarize the performance characteristics of coroutines and threads from them.
 
 \subsection{Experiment A: Test in User Mode without the Syscall}
 
-This experiment uses coroutines or threads to make ordinary function calls in user mode, and does not use system calls and does not involve the kernel.
-
-The experimental steps are as follows:
-
-1. This experiment is created as processes, and each process creates N coroutines or threads to do the same work. These N coroutines or threads are numbered from 1 to N, and the value of the number is passed in as a parameter. Get a start time when the process starts, get an end time before the process exits, and use the time difference between the two as their total execution time;
-
-2. Each coroutine or thread will mutually exclusive read and write a global variable, execute the read first, and execute the write after the read is successful. The initial value of the global variable is set to 0. When the value of the global variable read by the coroutine or thread is equal to its own number, it is considered that the reading is successful, and then the write operation is performed, that is, the value of the global variable is incremented by 1. When all coroutines or threads are created, the main thread adds 1 to the global variable so that the coroutine or thread numbered 1 can start reading and writing. It also enables subsequent coroutines or threads to be started.
-
-3. When the reading is unsuccessful, the coroutines yield the thread stack according to the asynchronous mechanism and wait to be woken up; the thread calls the system call to perform thread switching.
-
-4. In this experiment, the concurrency of coroutines or threads is increased from 200 to 4000, and the step size is 200;
+In this experiment, we test the performance of coroutines and threads in user mode, and will not actively call system calls to enter the kernel. In order to reflect the asynchronous characteristics of coroutines and the context switching of threads, coroutines or threads will mutually exclusive read and write a global variable. Specifically, multiple coroutines or threads will be created in the process, and they will be numbered sequentially starting from 1, and the value of the global variable will be initialized to 0. When all coroutines or threads are created, the main thread of the process will modify the value of the global variable to 1. Each coroutine or thread will read the global variable, and if the value is equal to their own number, they will add 1 to the value of the global variable. Otherwise, the coroutine will be suspended through the asynchronous mechanism, and the thread will be switched through the yield system call.
 
 \begin{figure}[ht]
 \begin{center}
 \centerline{\includegraphics[width=\columnwidth]{user.png}}
-\caption{Performance comparison of coroutines and threads in user mode}
+\caption{Coroutines or threads mutually exclusive read and write a global variable in user mode.}
 \label{user}
 \end{center}
 \end{figure}
 
-\begin{figure}[ht]
-\begin{center}
-\centerline{\includegraphics[width=\columnwidth]{user_table.png}}
-\caption{Test data of key nodes, including starting point, ending point, and the turning point where the coroutine performance exceeds the thread}
-\label{user_table}
-\end{center}
-\end{figure}
+\begin{table}[ht]
+    \centering
+    \caption{The start, intersection, and end points of \textit{Figure 3}.}
+    \setlength{\tabcolsep}{7mm}
+    \begin{tabular}{c|cc}
+  \Xhline{1.2pt}
+  \toprule
+  Concurrency & \multicolumn{2}{c}{time (MS)}\\
+  \Xcline{2-3}{0.1pt}
+  & Threads & Coroutines \\
+  %\Xhline{0.8pt}
+  \midrule
+  200 & 22 & 49 \\
+  800 & 122 & 124 \\
+  1000 & 193 & 164 \\
+  4000 & 2090 & 616 \\
+  \bottomrule
+  \Xhline{1.2pt}
+\end{tabular}
+    \label{tab:Experiment B}
+\end{table}
 
-As can be seen from [Figure 5], when the concurrency is small, the total execution time of coroutines is greater than that of threads. The total execution time of coroutines increases steadily as the number of concurrency increases, while the total execution time of threads increases rapidly and exceeds that of coroutines. It can be seen from [Table 1] that at the beginning of this experiment, that is, when the concurrency is 200, the performance of coroutines is weaker than that of threads; When the concurrency is greater than or equal to 800, the performance of the coroutines begins to exceed that of the threads; when the maximum concurrency of the test is 4000, the total execution time of the coroutine is about 26\% of the thread.
+We tested the execution time under each concurrency from 200 to 4000 with an interval of 200, and the test results are shown in figure and table. We can see that when the amount of concurrency is small, the execution time of coroutines is slightly higher than that of threads. However, as the amount of concurrency increases, the execution time of coroutines will increase steadily along a slash, while the growth rate of threads will be much faster, and the difference between the two will gradually increase. When the concurrency is between 800 and 1000, their execution time will be equal, and then the performance of coroutines will exceed that of threads. When the concurrency is between 4000, the total execution time of coroutines is about \textit{26\%} of threads.
 
 \subsection{Experiment B: Test in user mode with syscall}
 
-This experiment is carried out in user mode, and each coroutine or thread will use read and write system calls, so this experiment involves the kernel. This experiment is carried out in user mode, and each coroutine or thread will use read and write system calls to enter the kernel. 
+Here we will test the performance of coroutines and threads under high concurrency to read and write kernel buffers through system calls. We still need to ensure that the experiment can reflect the asynchronous characteristics of the coroutine and the context switching of the thread, so the design experiment is shown in the figure-For each test, we will create some coroutines or threads numbered from 1 in the process, and create pipes one more than them in number, and the number of pipes also starts from 1. Each coroutine or thread will read fixed size data from the previous pipe and write it to the next pipe. Obviously, when the read is not completed, the coroutine will be suspended through the asynchronous mechanism, and the thread will be switched through the yield system call. After the creation work is done, the main thread of the process will write data to pipe 1, and the data will flow between the coroutines or threads and the pipes.
 
 \begin{figure}[ht]
 \begin{center}
-\centerline{\includegraphics[width=\columnwidth]{test2.png}}
-\caption{experiment B, the read and write ends of the pipe are located in two coroutines or threads, respectively.}
+\centerline{\includegraphics[width=\columnwidth]{expb.png}}
+\caption{Experiment B: Connect the front and back coroutines or threads through the read and write ends of the pipes.}
 \label{test2}
 \end{center}
 \end{figure}
 
-The experiments we designed are shown in \textit{Figure 6}. The experimental steps are as follows:
 
-1. This experiment is created as processes, and each process creates N coroutines or threads to do the same work. These N coroutines or threads are numbered from 1 to N, and the value of the number is passed in as a parameter. Get a start time when the process starts, get an end time before the process exits, and use the time difference between the two as their total execution time;
-
-2. We create N+1 pipes, numbered from 1 to N+1, pipes can be read and written by different coroutines or threads. The working method of the used pipe is: only when the write end is closed, the read operation of this pipe can read the data and then complete the read operation; when the write end is not closed, the read operation will cause thread switching in the kernel;
-
-3. Each coroutine or thread reads and writes to the pipes. Specifically, the coroutine or thread numbered i (1<= i <= N) will read data from the pipe numbered i. After its write end is closed, the coroutine or thread can successfully read the data, then write data to the pipe numbered i + 1 and close the write end of the pipe numbered i + 1. Then the work of this coroutine or thread is completed, and the coroutine or thread numbered i + 1 can start the read operation. It is equivalent to using pipes to connect all coroutines or threads in series, and the read and write operations to the same pipe are located in two adjacent coroutines or threads.
-
-4. After all coroutines or threads are created, the main thread of the test program will directly write data to pipe 1 and then close its write end. After that, with the scheduling and execution of coroutines or threads, the data will be read from the pipe numbered 1 by the coroutine or thread numbered 1, and then written to pipe 2, and the coroutine or thread numbered 2 will read the data from pipe 2, and then write to pipe 3, and so on;
-
-5. Pipes read and write the same amount of data per test. We tested coroutines and threads on three data sizes of 1B, 256B, and 4096B, respectively.
-
-6. In the experiment, the concurrency of coroutines and threads is increased from 200 to 4000, and the step size is 200;
-
-\begin{figure}[ht]
+\begin{figure}[htb]
 \begin{center}
-\centerline{\includegraphics[width=\columnwidth]{1B.png}}
-\caption{The amount of data read and written by the pipe is 1B}
-\label{1B}
+\centerline{\includegraphics[width=\columnwidth]{tc.png}}
+\caption{The performance of coroutines and threads under different data sizes.}
+\label{tv}
 \end{center}
 \end{figure}
 
-\begin{figure}[ht]
-\begin{center}
-\centerline{\includegraphics[width=\columnwidth]{256B.png}}
-\caption{The amount of data read and written by the pipe is 256B}
-\label{256B}
-\end{center}
-\end{figure}
 
-\begin{figure}[ht]
-\begin{center}
-\centerline{\includegraphics[width=\columnwidth]{4096B.png}}
-\caption{The amount of data read and written by the pipe is 4096B}
-\label{4096B}
-\end{center}
-\end{figure}
+\begin{table}[htb]
+    \centering
+    \caption{All endpoints in \textit{Figure 5}.}
+    \setlength{\tabcolsep}{3.3mm}
+    \begin{tabular}{cc|cc}
+  \Xhline{1.2pt}
+  \toprule
+  Data Size & Concurrency & \multicolumn{2}{c}{time (MS)}\\
+  \Xcline{3-4}{0.1pt}
+  & & Threads & Coroutines \\
+  %\Xhline{0.8pt}
+  \midrule
+  1B & 4000 & 1956 & 651 \\
+  256B & 4000 & 2103 & 681 \\
+  4096B & 4000 & 2484 & 1099 \\
+  \bottomrule
+  \Xhline{1.2pt}
+\end{tabular}
+    \label{tab:Experiment B}
+\end{table}
 
-\begin{figure}[ht]
-\begin{center}
-\centerline{\includegraphics[width=\columnwidth]{1B_table.png}}
-\caption{Test data of key nodes with 1B data volume}
-\label{bayespic}
-\end{center}
-\end{figure}
+Since the following coroutines must wait for the previous coroutines to complete before they can run, we give the first coroutine the highest priority so that the flow of data can start as early as possible.
 
-\begin{figure}[ht]
-\begin{center}
-\centerline{\includegraphics[width=\columnwidth]{256B_table.png}}
-\caption{Test data of key nodes with 256B data volume}
-\label{256B_table}
-\end{center}
-\end{figure}
+We tested three different data sizes, \textit{1B}, \textit{256B}, \textit{4096B}, and tested the execution time under each concurrency from 200 to 4000 with an interval of 200. The test results are shown in figure and table. We can see that the relative performance of coroutines and threads is similar to experiment A. When the concurrency reaches 4000, the total execution time of the coroutines is about \textit{32\%-44\%} of the threads.
 
-\begin{figure}[ht]
-\begin{center}
-\centerline{\includegraphics[width=\columnwidth]{4096B_table.png}}
-\caption{Test data of key nodes with 4096B data volume}
-\label{4096B_table}
-\end{center}
-\end{figure}
+\subsection{Experimental Discussions}
 
-It can be seen from \textit{Figure 7, 8, 9} that when the concurrency is small, the total execution time of coroutines and threads is very close. As the amount of concurrency increases, the total execution time of threads increases rapidly and exceeds that of coroutines. It can be seen from \textit{Figure 10, 11, 12} that in this experiment when the concurrency is 200, the performance of the coroutine is weaker than that of the thread; when the concurrency is greater than or equal to 400, the performance of the coroutine begins to exceed that of the thread; When the tested maximum concurrency of 4000 is reached, the total execution time of the coroutines is about \textit{32\% - 44\%} of the threads.
-
-Through experiments we can see that the performance of coroutines is not necessarily better than threads in all cases. When the amount of concurrency is small, the basic overhead of supporting the coroutine running, including the coroutine scheduler and the wake-up mechanism, has a significant impact, resulting in the performance of the coroutine at this time being close to that of the thread. However, as shown in the experimental data, the usage overhead of coroutines increases linearly with the increase of concurrency, which means that the increase of concurrency does not significantly impact the average execution time and average switching time of coroutines. This is a distinguishing feature of coroutines from threads and also the significance of coroutines for concurrent programming. In contrast, the context switching cost of threads increases with the increase of concurrency, which causes the performance of coroutines to gradually exceed threads when the amount of concurrency increases, and the gap between the two becomes larger and larger.
+Through experiments we can see that the performance of coroutines is not necessarily better than threads in all cases. When concurrency is small, the basic overhead of supporting the coroutine running, including the coroutine scheduler and the wake-up mechanism, has a significant impact, resulting in the performance of the coroutine at this time being close to that of the thread. However, as shown in the experimental data, the usage overhead of coroutines increases linearly with the increase of concurrency, which means that the increase of concurrency does not significantly impact the average execution time and average switching time of coroutines. This is a distinguishing feature of the coroutine from the thread and also the significance of the coroutine for concurrent programming. In contrast, the context switching cost of threads increases with the increase of concurrency, which causes the performance of coroutines to gradually exceed threads when the concurrency increases, and the gap between the two becomes larger and larger.
 
 \section{Conclusions}
 
-This paper proposes and implements a coroutine model based on Rust language features. A Rust operating system can use this coroutine library to create and run coroutines that support priority scheduling in user mode and the kernel.  Based on the O(1) scheduling algorithm of Linux, we designed the coroutine priority bitmap of the process and the coroutine priority bitmap of the kernel, so that the scheduling of coroutines is no longer an independent behavior within each process, but can be controlled by the kernel. This allows some time-sensitive coroutines to be scheduled preferentially in the entire system, while some time-insensitive coroutines can be set to a lower priority, reducing competition with high-priority coroutines, so that the processor can be assigned more flexibly and scientifically.
-
-We have introduced this coroutine library on rCore OS and conducted performance comparison experiments. Experimental results show that the performance of coroutines is not necessarily better than threads in all cases. When the amount of concurrency is small, the execution time of coroutines will be longer than that of threads. This is because the basic overhead required to run coroutines, such as scheduling, switching, and wake-up, significantly impacts the coroutines when the number of concurrency is small. However, as the amount of concurrency increases, the overhead required for coroutines to run grows slowly while threads grow rapidly, so the gap between the two continues to grow. When the concurrency is greater than 200 - 800, the execution time of the threads gradually exceeds that of the coroutines. When the concurrency reaches 4000, the total execution time of the coroutines is about \textit{26\% - 44\%} of the threads.
+This paper proposes and implements a coroutine model based on the Rust language. A Rust operating system can use this coroutine library to create and run coroutines that support priority scheduling in user mode and the kernel. We have introduced this coroutine library on rCore OS and conducted performance comparison experiments. The results show whether the performance of the coroutine is stronger than the thread is affected by the amount of concurrency. As the concurrency increases, the performance of coroutines will gradually be higher than that of threads. In the experiment we designed, when the concurrency is greater than \textit{200 - 800}, the total execution time of the threads gradually exceeds that of the coroutines, when the concurrency reaches 4000, the total execution time of the coroutines is about \textit{26\% - 44\%} of the threads.
 
 \bibliographystyle{plain}
 %% Define a new 'leo' style for the package that will use a smaller font.
