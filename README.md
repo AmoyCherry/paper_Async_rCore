@@ -2,6 +2,8 @@
 
 ## Conference
 
+*conference information(acceptance rate, citations, etc.)*:  [Aminer](https://www.aminer.cn/ranks/conf?domain_ids=624521982faec9f93681e73a&type=ccf&search=seke&metric=ccf_level&order=ascend&ccf_level=A,B,C&category=Conference)
+
 | Conference                                                                | Abstract Deadline | Paper Deadline | Notification |
 | ------------------------------------------------------------------------- | ----------------- | -------------- | ------------ |
 | [COMPSAC](https://ieeecompsac.computer.org/2023/information-for-authors/) |                   | January 31     | April 1      |
@@ -17,7 +19,7 @@
 
 [SEKE](http://ksiresearch.org/seke/seke23.html)
 
-#### paper version
+#### Paper version
 
 - [tex_source_code](https://github.com/AmoyCherry/papper_Async_rCore/tree/main/paper/2023-0127/tex_source_code)
 
