@@ -13,9 +13,15 @@
 
 ## Log
 
+### 2023-0420
+
+Rej from SEKE23.
+
+Reviews.
+
 ### 2023-0127
 
-#### Submitted conference
+#### Submitted to conference
 
 [SEKE](http://ksiresearch.org/seke/seke23.html)
 
@@ -24,5 +30,4 @@
 - [tex_source_code](https://github.com/AmoyCherry/papper_Async_rCore/tree/main/paper/2023-0127/tex_source_code)
 
 - [pdf](https://github.com/AmoyCherry/papper_Async_rCore/blob/main/paper/2023-0127/A%20Design%20and%20Implementation%20of%20Rust%20Coroutine%20with%20priority%20in%20Operating%20System.pdf)
-
 
